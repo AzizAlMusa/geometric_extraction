@@ -3,6 +3,7 @@
 
 from loaders.loader import load_point_cloud
 from primitives.plane_fitting import fit_planes
+from primitives.cylinder_fitting import fit_cylinders
 from geometry.edges_vertices import build_segments_vertices_edges, rebuild_clean_faces
 from visualization.viewer import show_raw, show_planes, show_lines_vertices, show_clean
 from geometry.filtering import filter_edges
@@ -12,15 +13,17 @@ FILE = "models/cube_with_square_hole.pcd"
 N_SAMPLES = 30000
 INFLATE = 1.5
 MAX_PLANES = 15
+MAX_CYLINDERS = 4
 
 def main():
     # 1) Raw gray cloud
     pcd, diag = load_point_cloud(FILE, n_samples=N_SAMPLES, force_gray=True)
     show_raw(pcd, title="1) raw cloud")
 
-    # 2) Fitted planes (double-sided, palette)
+    # 2) Fitted planes + cylinders (double-sided, palette)
     planes, patches = fit_planes(pcd, max_planes=MAX_PLANES, inflate=INFLATE)
-    show_planes(patches, title="2) fitted planes")
+    cylinders, cyl_meshes = fit_cylinders(pcd, max_cylinders=MAX_CYLINDERS)
+    show_planes(patches + cyl_meshes, title="2) fitted planes + cylinders")
 
     # 3) Intersections → segments + vertices (red lines + dark green verts only)
     segments, V, edges, vtx_tol, sphere_r = build_segments_vertices_edges(planes, diag)
