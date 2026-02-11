@@ -13,7 +13,7 @@ FILE = "models/cube_with_square_hole.pcd"
 N_SAMPLES = 30000
 INFLATE = 1.5
 MAX_PLANES = 15
-MAX_CYLINDERS = 4
+MAX_CYLINDERS = 2
 
 def main():
     # 1) Raw gray cloud
@@ -21,8 +21,15 @@ def main():
     show_raw(pcd, title="1) raw cloud")
 
     # 2) Fitted planes + cylinders (double-sided, palette)
-    planes, patches = fit_planes(pcd, max_planes=MAX_PLANES, inflate=INFLATE)
-    cylinders, cyl_meshes = fit_cylinders(pcd, max_cylinders=MAX_CYLINDERS)
+    planes, patches, remaining = fit_planes(
+        pcd,
+        max_planes=MAX_PLANES,
+        inflate=INFLATE,
+        min_inlier_ratio_remaining=0.06,
+        max_aspect_ratio=5.0,
+        return_remaining=True,
+    )
+    cylinders, cyl_meshes = fit_cylinders(remaining, max_cylinders=MAX_CYLINDERS)
     show_planes(patches + cyl_meshes, title="2) fitted planes + cylinders")
 
     # 3) Intersections → segments + vertices (red lines + dark green verts only)

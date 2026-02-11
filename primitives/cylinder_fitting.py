@@ -27,16 +27,34 @@ def _axis_rotation_from_z(target_axis):
     if np.isclose(dot, 1.0):
         return np.eye(3)
     if np.isclose(dot, -1.0):
-        return o3d.geometry.get_rotation_matrix_from_axis_angle(np.array([1.0, 0.0, 0.0]) * np.pi)
+        return o3d.geometry.get_rotation_matrix_from_axis_angle(
+            np.array([1.0, 0.0, 0.0]) * np.pi
+        )
 
     axis = normalize(np.cross(z, a))
     angle = np.arccos(dot)
     return o3d.geometry.get_rotation_matrix_from_axis_angle(axis * angle)
 
 
-def _fit_single_cylinder(points, diag):
+def _angle_coverage(points, center, axis, bins=24):
+    """Fraction of azimuth bins occupied around the cylinder axis."""
+    h = np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    u = normalize(h - np.dot(h, axis) * axis)
+    v = np.cross(axis, u)
+
+    q = points - center
+    x = q @ u
+    y = q @ v
+    ang = np.arctan2(y, x)
+
+    edges = np.linspace(-np.pi, np.pi, bins + 1)
+    hist, _ = np.histogram(ang, bins=edges)
+    return float(np.count_nonzero(hist)) / float(bins)
+
+
+def _fit_single_cylinder(points, diag, min_coverage=0.45):
     """Estimate one cylinder from a set of points using PCA + radial consistency."""
-    if len(points) < 200:
+    if len(points) < 250:
         return None, None
 
     c = points.mean(axis=0)
@@ -49,9 +67,10 @@ def _fit_single_cylinder(points, diag):
     radial = np.linalg.norm(points - closest_axis, axis=1)
 
     r = float(np.median(radial))
-    dist_thr = max(0.005 * diag, 1e-4)
+    dist_thr = max(0.004 * diag, 1e-4)
     inliers = np.where(np.abs(radial - r) <= dist_thr)[0]
-    if len(inliers) < max(150, int(0.01 * len(points))):
+
+    if len(inliers) < max(250, int(0.03 * len(points))):
         return None, None
 
     P = points[inliers]
@@ -59,22 +78,35 @@ def _fit_single_cylinder(points, diag):
     centered2 = P - c2
     _, _, vh2 = np.linalg.svd(centered2, full_matrices=False)
     axis2 = normalize(vh2[0])
+
     t2 = (P - c2) @ axis2
     closest2 = c2 + np.outer(t2, axis2)
     radial2 = np.linalg.norm(P - closest2, axis=1)
     r2 = float(np.median(radial2))
-    t_min, t_max = float(np.min(t2)), float(np.max(t2))
+
+    # quality gates
+    radial_mad = float(np.median(np.abs(radial2 - r2)))
+    h2 = float(np.max(t2) - np.min(t2))
+    coverage = _angle_coverage(P, c2, axis2, bins=30)
+
+    if radial_mad > 0.02 * diag:
+        return None, None
+    if coverage < min_coverage:
+        return None, None
+    if h2 < 0.12 * diag or r2 < 0.015 * diag:
+        return None, None
 
     return {
         "center": c2,
         "axis": axis2,
         "radius": r2,
-        "t_min": t_min,
-        "t_max": t_max,
+        "t_min": float(np.min(t2)),
+        "t_max": float(np.max(t2)),
+        "coverage": coverage,
     }, inliers
 
 
-def fit_cylinders(pcd, max_cylinders=4):
+def fit_cylinders(pcd, max_cylinders=2):
     """Fit coarse cylindrical patches from a point cloud.
 
     Returns
@@ -98,14 +130,11 @@ def fit_cylinders(pcd, max_cylinders=4):
             break
 
         h = fit["t_max"] - fit["t_min"]
-        if h < 0.05 * diag or fit["radius"] < 1e-6:
-            break
-
         mesh = o3d.geometry.TriangleMesh.create_cylinder(
             radius=fit["radius"],
             height=h,
-            resolution=50,
-            split=4,
+            resolution=60,
+            split=6,
         )
         mesh.compute_vertex_normals()
         mesh.paint_uniform_color(PALETTE[(i + 7) % len(PALETTE)].tolist())
@@ -128,7 +157,7 @@ def fit_cylinders(pcd, max_cylinders=4):
         mask = np.ones(len(remaining), dtype=bool)
         mask[inliers] = False
         remaining = remaining[mask]
-        if len(remaining) < 200:
+        if len(remaining) < 250:
             break
 
     return cylinders, [c.mesh for c in cylinders]
