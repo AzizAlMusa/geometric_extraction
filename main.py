@@ -25,15 +25,20 @@ def main():
         pcd,
         max_planes=MAX_PLANES,
         inflate=INFLATE,
-        min_inlier_ratio_remaining=0.08,
-        max_aspect_ratio=4.0,
-        max_normal_median_deg=10.0,
-        max_normal_p90_deg=20.0,
-        stop_on_reject=True,
+        min_inlier_ratio_remaining=0.06,
+        max_aspect_ratio=4.5,
+        max_normal_median_deg=16.0,
+        max_normal_p90_deg=32.0,
+        stop_on_reject=False,
+        max_reject_streak=3,
         return_remaining=True,
     )
     cylinders, cyl_meshes = fit_cylinders(remaining, max_cylinders=MAX_CYLINDERS)
-    show_planes(patches + cyl_meshes, title="2) fitted planes + cylinders")
+    stage2_meshes = patches + cyl_meshes
+    if stage2_meshes:
+        show_planes(stage2_meshes, title="2) fitted planes + cylinders")
+    else:
+        show_raw(remaining, title="2) residual cloud (no valid planes/cylinders)")
 
     # 3) Intersections → segments + vertices (red lines + dark green verts only)
     segments, V, edges, vtx_tol, sphere_r = build_segments_vertices_edges(planes, diag)

@@ -70,15 +70,18 @@ def fit_planes(
     inflate=1.5,
     min_inlier_ratio_remaining=0.05,
     max_aspect_ratio=6.0,
-    max_normal_median_deg=12.0,
-    max_normal_p90_deg=25.0,
-    stop_on_reject=True,
+    max_normal_median_deg=18.0,
+    max_normal_p90_deg=35.0,
+    stop_on_reject=False,
+    max_reject_streak=3,
     return_remaining=False,
 ):
     """Fit multiple planes with stronger quality gating.
 
-    Rejected candidates are treated as a stop signal by default, which prevents
-    repeatedly carving tangent strips from curved surfaces (e.g. cylindrical holes).
+    Rejected candidates increment a reject streak; extraction stops after
+    ``max_reject_streak`` to avoid repeatedly carving tangent strips from curved
+    surfaces (e.g. cylindrical holes) while still allowing recovery from one-off
+    noisy candidates.
     """
     planes = []
     remaining = pcd
@@ -90,6 +93,8 @@ def fit_planes(
     dist_thr = 0.01 * diag
     min_inlier = max(400, int(0.003 * len(pcd.points)))
     Cscene = np.asarray(pcd.points).mean(axis=0) if len(pcd.points) else np.zeros(3)
+
+    reject_streak = 0
 
     for i in range(max_planes):
         n_remaining = len(remaining.points)
@@ -113,7 +118,8 @@ def fit_planes(
         # Reject if point normals do not align well with the candidate plane.
         med_ang, p90_ang = _plane_normal_consistency(cloud, n)
         if med_ang > max_normal_median_deg or p90_ang > max_normal_p90_deg:
-            if stop_on_reject:
+            reject_streak += 1
+            if stop_on_reject or reject_streak >= max_reject_streak:
                 break
             continue
 
@@ -156,13 +162,15 @@ def fit_planes(
         mask = (u >= umin) & (u <= umax) & (v >= vmin) & (v <= vmax)
         uv_trim = uv[mask]
         if len(uv_trim) < 30:
-            if stop_on_reject:
+            reject_streak += 1
+            if stop_on_reject or reject_streak >= max_reject_streak:
                 break
             continue
 
         hull_uv = hull2d(uv_trim)
         if len(hull_uv) < 3:
-            if stop_on_reject:
+            reject_streak += 1
+            if stop_on_reject or reject_streak >= max_reject_streak:
                 break
             continue
 
@@ -171,7 +179,8 @@ def fit_planes(
         span_v = max(float(uv_trim[:, 1].ptp()), 1e-12)
         aspect = max(span_u, span_v) / min(span_u, span_v)
         if aspect > max_aspect_ratio:
-            if stop_on_reject:
+            reject_streak += 1
+            if stop_on_reject or reject_streak >= max_reject_streak:
                 break
             continue
 
@@ -183,7 +192,8 @@ def fit_planes(
 
         mesh = poly_mesh_double_sided(XYZ)
         if mesh is None:
-            if stop_on_reject:
+            reject_streak += 1
+            if stop_on_reject or reject_streak >= max_reject_streak:
                 break
             continue
         mesh.paint_uniform_color(PALETTE[i % len(PALETTE)].tolist())
@@ -192,6 +202,7 @@ def fit_planes(
             PlanePatch(n=n, d=d, o=o, R=R, hull_uv=hull_uv, hull_xyz=XYZ, mesh=mesh)
         )
 
+        reject_streak = 0
         remaining = remaining.select_by_index(inliers, invert=True)
 
     patches = [p.mesh for p in planes]
