@@ -25,8 +25,11 @@ def main():
         pcd,
         max_planes=MAX_PLANES,
         inflate=INFLATE,
-        min_inlier_ratio_remaining=0.06,
-        max_aspect_ratio=5.0,
+        min_inlier_ratio_remaining=0.08,
+        max_aspect_ratio=4.0,
+        max_normal_median_deg=10.0,
+        max_normal_p90_deg=20.0,
+        stop_on_reject=True,
         return_remaining=True,
     )
     cylinders, cyl_meshes = fit_cylinders(remaining, max_cylinders=MAX_CYLINDERS)

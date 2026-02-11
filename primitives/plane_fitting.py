@@ -38,24 +38,55 @@ def plane_from_model(model):
     return n, d
 
 
+def _ensure_normals(pcd, diag):
+    if len(pcd.points) == 0 or pcd.has_normals():
+        return
+    radius = max(0.04 * diag, 1e-3)
+    pcd.estimate_normals(
+        search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=radius, max_nn=40)
+    )
+
+
+def _plane_normal_consistency(cloud, plane_n):
+    if not cloud.has_normals() or len(cloud.normals) == 0:
+        return 0.0, 0.0
+
+    normals = np.asarray(cloud.normals)
+    nn = np.linalg.norm(normals, axis=1)
+    valid = nn > 1e-12
+    if not np.any(valid):
+        return 0.0, 0.0
+
+    normals = normals[valid] / nn[valid][:, None]
+    dots = np.abs(normals @ plane_n)
+    dots = np.clip(dots, -1.0, 1.0)
+    ang = np.degrees(np.arccos(dots))
+    return float(np.median(ang)), float(np.percentile(ang, 90))
+
+
 def fit_planes(
     pcd,
     max_planes=15,
     inflate=1.5,
     min_inlier_ratio_remaining=0.05,
     max_aspect_ratio=6.0,
+    max_normal_median_deg=12.0,
+    max_normal_p90_deg=25.0,
+    stop_on_reject=True,
     return_remaining=False,
 ):
-    """Fit multiple planes with quality-gated acceptance.
+    """Fit multiple planes with stronger quality gating.
 
-    The additional acceptance gates are designed to reject spurious plane fits
-    on curved structures (for example strips on a cylindrical wall).
+    Rejected candidates are treated as a stop signal by default, which prevents
+    repeatedly carving tangent strips from curved surfaces (e.g. cylindrical holes).
     """
     planes = []
     remaining = pcd
 
     bbox = pcd.get_axis_aligned_bounding_box()
     diag = float(np.linalg.norm(bbox.get_extent()))
+    _ensure_normals(remaining, diag)
+
     dist_thr = 0.01 * diag
     min_inlier = max(400, int(0.003 * len(pcd.points)))
     Cscene = np.asarray(pcd.points).mean(axis=0) if len(pcd.points) else np.zeros(3)
@@ -78,6 +109,13 @@ def fit_planes(
 
         cloud = remaining.select_by_index(inliers)
         n, d = plane_from_model(model)
+
+        # Reject if point normals do not align well with the candidate plane.
+        med_ang, p90_ang = _plane_normal_consistency(cloud, n)
+        if med_ang > max_normal_median_deg or p90_ang > max_normal_p90_deg:
+            if stop_on_reject:
+                break
+            continue
 
         o_tmp = project_to_plane(n, d, cloud.get_center())
         if np.dot(n, o_tmp - Cscene) < 0:
@@ -118,12 +156,14 @@ def fit_planes(
         mask = (u >= umin) & (u <= umax) & (v >= vmin) & (v <= vmax)
         uv_trim = uv[mask]
         if len(uv_trim) < 30:
-            remaining = remaining.select_by_index(inliers, invert=True)
+            if stop_on_reject:
+                break
             continue
 
         hull_uv = hull2d(uv_trim)
         if len(hull_uv) < 3:
-            remaining = remaining.select_by_index(inliers, invert=True)
+            if stop_on_reject:
+                break
             continue
 
         # Reject long thin strips (common false planes on curved surfaces).
@@ -131,7 +171,8 @@ def fit_planes(
         span_v = max(float(uv_trim[:, 1].ptp()), 1e-12)
         aspect = max(span_u, span_v) / min(span_u, span_v)
         if aspect > max_aspect_ratio:
-            remaining = remaining.select_by_index(inliers, invert=True)
+            if stop_on_reject:
+                break
             continue
 
         c2 = hull_uv.mean(0)
@@ -142,7 +183,8 @@ def fit_planes(
 
         mesh = poly_mesh_double_sided(XYZ)
         if mesh is None:
-            remaining = remaining.select_by_index(inliers, invert=True)
+            if stop_on_reject:
+                break
             continue
         mesh.paint_uniform_color(PALETTE[i % len(PALETTE)].tolist())
 
