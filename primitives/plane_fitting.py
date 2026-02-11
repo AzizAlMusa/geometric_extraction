@@ -72,6 +72,7 @@ def fit_planes(
     max_aspect_ratio=6.0,
     max_normal_median_deg=18.0,
     max_normal_p90_deg=35.0,
+    use_normal_gate=True,
     stop_on_reject=False,
     max_reject_streak=3,
     return_remaining=False,
@@ -116,12 +117,13 @@ def fit_planes(
         n, d = plane_from_model(model)
 
         # Reject if point normals do not align well with the candidate plane.
-        med_ang, p90_ang = _plane_normal_consistency(cloud, n)
-        if med_ang > max_normal_median_deg or p90_ang > max_normal_p90_deg:
-            reject_streak += 1
-            if stop_on_reject or reject_streak >= max_reject_streak:
-                break
-            continue
+        if use_normal_gate:
+            med_ang, p90_ang = _plane_normal_consistency(cloud, n)
+            if med_ang > max_normal_median_deg or p90_ang > max_normal_p90_deg:
+                reject_streak += 1
+                if stop_on_reject or reject_streak >= max_reject_streak:
+                    break
+                continue
 
         o_tmp = project_to_plane(n, d, cloud.get_center())
         if np.dot(n, o_tmp - Cscene) < 0:

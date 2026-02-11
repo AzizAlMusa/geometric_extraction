@@ -29,10 +29,25 @@ def main():
         max_aspect_ratio=4.5,
         max_normal_median_deg=16.0,
         max_normal_p90_deg=32.0,
+        use_normal_gate=True,
         stop_on_reject=False,
         max_reject_streak=3,
         return_remaining=True,
     )
+
+    # fallback: if strict gating rejected everything, run a relaxed recovery pass
+    if len(patches) == 0:
+        planes, patches, remaining = fit_planes(
+            pcd,
+            max_planes=MAX_PLANES,
+            inflate=INFLATE,
+            min_inlier_ratio_remaining=0.035,
+            max_aspect_ratio=7.5,
+            use_normal_gate=False,
+            stop_on_reject=False,
+            max_reject_streak=6,
+            return_remaining=True,
+        )
     cylinders, cyl_meshes = fit_cylinders(remaining, max_cylinders=MAX_CYLINDERS)
     stage2_meshes = patches + cyl_meshes
     if stage2_meshes:
